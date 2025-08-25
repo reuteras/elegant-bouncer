@@ -11,10 +11,10 @@
 //  Matt Suiche (msuiche) 23-Aug-2025
 //
 use crate::errors::ScanResultStatus;
+use log::{error, warn};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use log::{error, warn};
 
 const TIFF_LITTLE_ENDIAN: u16 = 0x4949;
 const TIFF_BIG_ENDIAN: u16 = 0x4D4D;
@@ -83,22 +83,24 @@ impl TIFFReader {
 
     fn read_header(&mut self) -> std::io::Result<u32> {
         self.seek(0)?;
-        
+
         let byte_order = self.read_u16()?;
         self.is_little_endian = match byte_order {
             TIFF_LITTLE_ENDIAN => true,
             TIFF_BIG_ENDIAN => false,
-            _ => return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid TIFF byte order"
-            )),
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid TIFF byte order",
+                ))
+            }
         };
 
         let magic = self.read_u16()?;
         if magic != TIFF_MAGIC {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "Invalid TIFF magic number"
+                "Invalid TIFF magic number",
             ));
         }
 
@@ -107,7 +109,7 @@ impl TIFFReader {
 
     fn read_ifd(&mut self, offset: u32) -> std::io::Result<(Vec<IFDEntry>, u32)> {
         self.seek(offset as u64)?;
-        
+
         let num_entries = self.read_u16()?;
         let mut entries = Vec::with_capacity(num_entries as usize);
 
@@ -158,7 +160,7 @@ impl TIFFReader {
             self.seek(saved_pos)?;
             val
         };
-        
+
         let is_suspicious = samples == 2;
         Ok((is_suspicious, entry.value_offset))
     }
@@ -166,42 +168,42 @@ impl TIFFReader {
     fn check_jpeg_lossless(&mut self, offset: u32) -> std::io::Result<bool> {
         let saved_pos = self.file.stream_position()?;
         self.seek(offset as u64)?;
-        
+
         let mut found_sof3 = false;
         let mut suspicious_component_count = false;
-        
+
         for _ in 0..1000 {
             let marker1 = match self.read_u8() {
                 Ok(b) => b,
                 Err(_) => break,
             };
-            
+
             if marker1 != 0xFF {
                 continue;
             }
-            
+
             let marker2 = match self.read_u8() {
                 Ok(b) => b,
                 Err(_) => break,
             };
-            
+
             let marker = ((marker1 as u16) << 8) | (marker2 as u16);
-            
+
             if marker == SOF3_MARKER {
                 found_sof3 = true;
-                
+
                 let _length = self.read_u16()?;
                 let _precision = self.read_u8()?;
                 let _height = self.read_u16()?;
                 let _width = self.read_u16()?;
                 let component_count = self.read_u8()?;
-                
+
                 if component_count == 1 {
                     suspicious_component_count = true;
                 }
                 break;
             }
-            
+
             if marker >= 0xFFC0 && marker <= 0xFFFE && marker != 0xFFD8 && marker != 0xFFD9 {
                 let length = self.read_u16()?;
                 if length >= 2 {
@@ -210,7 +212,7 @@ impl TIFFReader {
                 }
             }
         }
-        
+
         self.seek(saved_pos)?;
         Ok(found_sof3 && suspicious_component_count)
     }
@@ -231,7 +233,7 @@ pub fn scan_dng_file(file_path: &Path) -> ScanResultStatus {
     let mut has_jpeg_lossless = false;
     let mut jpeg_offset = 0u32;
     let mut subifd_offsets = Vec::new();
-    
+
     while ifd_offset != 0 {
         let (entries, next_ifd) = match reader.read_ifd(ifd_offset) {
             Ok(data) => data,
@@ -280,11 +282,14 @@ pub fn scan_dng_file(file_path: &Path) -> ScanResultStatus {
                 if let Ok((is_suspicious, offset)) = reader.check_samples_per_pixel(&entry) {
                     if is_suspicious {
                         suspicious_samples_per_pixel = true;
-                        warn!("[!] Suspicious SamplesPerPixel value (2) found at offset 0x{:X}", offset);
+                        warn!(
+                            "[!] Suspicious SamplesPerPixel value (2) found at offset 0x{:X}",
+                            offset
+                        );
                     }
                 }
             }
-            
+
             if entry.tag == TAG_COMPRESSION {
                 if let Ok(compression) = reader.get_value_u16(&entry) {
                     if compression == JPEG_LOSSLESS_COMPRESSION {
@@ -292,7 +297,7 @@ pub fn scan_dng_file(file_path: &Path) -> ScanResultStatus {
                     }
                 }
             }
-            
+
             if entry.tag == TAG_JPEG_INTERCHANGE_FORMAT || entry.tag == TAG_STRIP_OFFSETS {
                 if let Ok(offset) = reader.get_value_u32(&entry) {
                     if offset > 0 {
@@ -307,7 +312,7 @@ pub fn scan_dng_file(file_path: &Path) -> ScanResultStatus {
         if let Ok(has_suspicious_sof3) = reader.check_jpeg_lossless(jpeg_offset) {
             if has_suspicious_sof3 {
                 warn!("[!] Suspicious SOF3 component count (1) found in JPEG Lossless data");
-                
+
                 if suspicious_samples_per_pixel {
                     error!("[!!!] CVE-2025-43300 detected: Modified SamplesPerPixel + SOF3 component count");
                     return ScanResultStatus::StatusMalicious;

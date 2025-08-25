@@ -10,7 +10,7 @@
 // Author:
 //  Matt Suiche (msuiche) 22-Sep-2023
 //
-use log::{info, debug, error};
+use log::{debug, error};
 use std::path;
 
 use crate::errors::*;
@@ -26,14 +26,14 @@ use crate::huffman::HTree;
 // Define the structure
 #[repr(C)]
 struct WebpHeader {
-    riff_sig:   [u8; 4],
-    file_size:  u32,
-    webp_sig:   [u8; 4],
-    vp8_sig:    [u8; 4],
-    vp8l_ssig:  [u8; 1],
-    data_size:  u32,
+    riff_sig: [u8; 4],
+    file_size: u32,
+    webp_sig: [u8; 4],
+    vp8_sig: [u8; 4],
+    vp8l_ssig: [u8; 1],
+    data_size: u32,
 
-    byte_data:  Vec<u8>,
+    byte_data: Vec<u8>,
 }
 
 impl WebpHeader {
@@ -45,7 +45,7 @@ impl WebpHeader {
             vp8_sig: [0; 4],
             vp8l_ssig: [0; 1],
             data_size: 0,
-            byte_data: Vec::new()
+            byte_data: Vec::new(),
         };
 
         // Read the fields one by one
@@ -65,7 +65,8 @@ impl WebpHeader {
     }
 
     fn is_valid(&self) -> bool {
-        &self.riff_sig == b"RIFF" && &self.webp_sig == b"WEBP" && &self.vp8_sig == b"VP8L" // && self.vp8l_ssig[0] == 0x2f
+        &self.riff_sig == b"RIFF" && &self.webp_sig == b"WEBP" && &self.vp8_sig == b"VP8L"
+        // && self.vp8l_ssig[0] == 0x2f
     }
 
     fn get_vp8l_data_size(&self) -> u32 {
@@ -78,10 +79,10 @@ impl WebpHeader {
 }
 
 pub struct VP8LBitReader<'a> {
-    pub data: &'a [u8],       // Reference to the underlying data.
-    pub idx: usize,           // Index to the current byte.
-    pub bit_offset: usize,    // Offset to the current bit within the current byte.
-    pub bits: u32,            // For the lookup table stuff
+    pub data: &'a [u8],    // Reference to the underlying data.
+    pub idx: usize,        // Index to the current byte.
+    pub bit_offset: usize, // Offset to the current bit within the current byte.
+    pub bits: u32,         // For the lookup table stuff
 }
 
 impl<'a> VP8LBitReader<'a> {
@@ -90,18 +91,18 @@ impl<'a> VP8LBitReader<'a> {
             data,
             idx: 0,
             bit_offset: 0,
-            bits: 0
+            bits: 0,
         }
     }
 
     pub fn read_bit(&mut self) -> Option<u8> {
         if self.idx >= self.data.len() {
-            return None;  // No more data to read.
+            return None; // No more data to read.
         }
 
         let byte = self.data[self.idx];
         let bit = (byte >> self.bit_offset) & 1;
-        
+
         self.bit_offset += 1;
 
         if self.bit_offset >= 8 {
@@ -114,7 +115,7 @@ impl<'a> VP8LBitReader<'a> {
 
     pub fn read_bits(&mut self, num_bits: u8) -> Option<u32> {
         if num_bits > 32 {
-            return None;  // Can't read more than 32 bits at once.
+            return None; // Can't read more than 32 bits at once.
         }
 
         let mut value: u32 = 0;
@@ -122,7 +123,7 @@ impl<'a> VP8LBitReader<'a> {
             match self.read_bit() {
                 Some(bit) => {
                     value |= (bit as u32) << n;
-                },
+                }
                 None => return None,
             }
         }
@@ -165,7 +166,7 @@ const K_ALPHABET_SIZE: [u16; HUFFMAN_CODES_PER_META_CODE] = [
     NUM_LITERAL_CODES,
     NUM_LITERAL_CODES,
     NUM_LITERAL_CODES,
-    NUM_DISTANCE_CODES
+    NUM_DISTANCE_CODES,
 ];
 
 const NUM_CODE_LENGTH_CODES: usize = 19;
@@ -185,7 +186,7 @@ impl fmt::Display for WebpError {
         match self {
             WebpError::UnsupportedBehavior => write!(f, "Unsupported behavior encountered"),
             // WebpError::UnexpectedEof => write!(f, "Unexpected end of file"),
-            WebpError::InvalidFile => write!(f, "Not a valid file.")
+            WebpError::InvalidFile => write!(f, "Not a valid file."),
         }
     }
 }
@@ -227,11 +228,11 @@ pub fn is_code_lengths_count_valid(code_lengths_code: &Vec<u32>, max_table_size:
     let mut key = 0;
 
     let root_bits = 8;
-    let mut table_bits = root_bits;        // key length of current table
-    let mut table_size = 1 << table_bits;  // size of current table
+    let mut table_bits = root_bits; // key length of current table
+    let mut table_size = 1 << table_bits; // size of current table
     let mut total_size = 1 << root_bits;
-    let mut low = 0xffffffff;        // low bits for current root entry
-    let mask = total_size - 1;    // mask for low bits
+    let mut low = 0xffffffff; // low bits for current root entry
+    let mask = total_size - 1; // mask for low bits
 
     let mut table_off = 0;
 
@@ -249,11 +250,11 @@ pub fn is_code_lengths_count_valid(code_lengths_code: &Vec<u32>, max_table_size:
     symbols.clear();
     symbols.resize(280, 0);
 
-    let mut _num_nodes = 1;   // number of Huffman tree nodes
-    let mut num_open = 1;    // number of open branches in current tree level
-    // root table
-    // This can be ignored because the overflow happens in the second.
-    // We run this only to have the latest key.
+    let mut _num_nodes = 1; // number of Huffman tree nodes
+    let mut num_open = 1; // number of open branches in current tree level
+                          // root table
+                          // This can be ignored because the overflow happens in the second.
+                          // We run this only to have the latest key.
     for len in 1..=root_bits {
         num_open <<= 1;
         _num_nodes += num_open;
@@ -278,14 +279,16 @@ pub fn is_code_lengths_count_valid(code_lengths_code: &Vec<u32>, max_table_size:
         num_open <<= 1;
         _num_nodes += num_open;
 
-        if  count[len as usize] >= num_open {
-            debug!("This should not happen. int underflow. (count =  {}, len = {})", count[len as usize], len);
+        if count[len as usize] >= num_open {
+            debug!(
+                "This should not happen. int underflow. (count =  {}, len = {})",
+                count[len as usize], len
+            );
             return false;
         }
         num_open -= count[len as usize];
 
         while count[len as usize] > 0 {
-
             // debug!("[{}] key = 0x{:x} mask = 0x{:x} low = 0x{:x}", if (key & mask) != low { "true" } else { "false"} , key, mask, low);
             if (key & mask) != low {
                 // info!("key = 0x{:x} mask = 0x{:x} low = 0x{:x}", key, mask, low);
@@ -301,7 +304,10 @@ pub fn is_code_lengths_count_valid(code_lengths_code: &Vec<u32>, max_table_size:
             // table_off, (key >> root_bits) + (table_size - step), key, total_size, table_size, step, max_table_size);
 
             if table_off + (key >> root_bits) + (table_size - step) >= max_table_size {
-                debug!("OVERFLOW!!!!!!! (offset = 0x{:x})", table_off + (key >> root_bits) + (table_size - step));
+                debug!(
+                    "OVERFLOW!!!!!!! (offset = 0x{:x})",
+                    table_off + (key >> root_bits) + (table_size - step)
+                );
                 has_overflow = true;
             }
 
@@ -320,7 +326,11 @@ pub fn is_code_lengths_count_valid(code_lengths_code: &Vec<u32>, max_table_size:
     has_overflow
 }
 
-fn decode_code_lengths(reader: &mut VP8LBitReader, dst: &mut Vec<u32>, code_length_code_lengths: &Vec<u32>) -> Result<()> {
+fn decode_code_lengths(
+    reader: &mut VP8LBitReader,
+    dst: &mut Vec<u32>,
+    code_length_code_lengths: &Vec<u32>,
+) -> Result<()> {
     let mut tree = HTree::new();
     let _ = tree.build(code_length_code_lengths).unwrap();
 
@@ -336,7 +346,7 @@ fn decode_code_lengths(reader: &mut VP8LBitReader, dst: &mut Vec<u32>, code_leng
             break;
         }
         max_symbol -= 1;
-        
+
         let code_length = tree.next(reader).map_err(|err| err).unwrap();
         // println!("code_length: {} (symbol = {}, max_symbol = {})", code_length, symbol, max_symbol);
         if code_length < repeats_code_length {
@@ -348,14 +358,16 @@ fn decode_code_lengths(reader: &mut VP8LBitReader, dst: &mut Vec<u32>, code_leng
             }
             continue;
         }
-        let repeat = reader.read_bits(repeat_bits[(code_length - repeats_code_length) as usize]).unwrap()
+        let repeat = reader
+            .read_bits(repeat_bits[(code_length - repeats_code_length) as usize])
+            .unwrap()
             + repeat_offsets[(code_length - repeats_code_length) as usize] as u32;
-        
+
         if symbol + repeat as usize > dst.len() {
             // return Err("Invalid Code Lengths"); // Or use your custom error type
             error!("Invalid code len");
         }
-        
+
         let mut cl = 0;
         if code_length == 16 {
             cl = prev_code_length;
@@ -389,8 +401,11 @@ fn get_code_lengths_count(code_lengths: &Vec<u32>) -> Vec<u32> {
     count
 }
 
-fn decode_huffman_tree(reader: &mut VP8LBitReader, alphabet_size: usize, max_table_size: u32) -> Result<ScanResultStatus> {
-
+fn decode_huffman_tree(
+    reader: &mut VP8LBitReader,
+    alphabet_size: usize,
+    max_table_size: u32,
+) -> Result<ScanResultStatus> {
     // info!("alphabet_size -> {}", alphabet_size);
 
     let mut code_lengths: Vec<u8> = vec![0; alphabet_size];
@@ -416,15 +431,18 @@ fn decode_huffman_tree(reader: &mut VP8LBitReader, alphabet_size: usize, max_tab
 
         // TODO:
         return Err(ElegantError::WebpError(WebpError::UnsupportedBehavior));
-    } else {  // Decode Huffman-coded code lengths.
+    } else {
+        // Decode Huffman-coded code lengths.
         let mut code_length_code_lengths: [u32; NUM_CODE_LENGTH_CODES] = [0; NUM_CODE_LENGTH_CODES];
-        let mut count: [u32; (MAX_ALLOWED_CODE_LENGTH + 1) as usize] = [0; (MAX_ALLOWED_CODE_LENGTH + 1) as usize];
+        let mut count: [u32; (MAX_ALLOWED_CODE_LENGTH + 1) as usize] =
+            [0; (MAX_ALLOWED_CODE_LENGTH + 1) as usize];
         let num_codes = reader.read_bits(4).unwrap() + 4; // lencode_read
-        // println!("num_codes = {}", num_codes);
-        // assert(num_codes <= NUM_CODE_LENGTH_CODES);
-    
+                                                          // println!("num_codes = {}", num_codes);
+                                                          // assert(num_codes <= NUM_CODE_LENGTH_CODES);
+
         for i in 0..num_codes {
-            code_length_code_lengths[K_CODE_LENGTH_CODE_ORDER[i as usize]] = reader.read_bits(3).unwrap() as u32;
+            code_length_code_lengths[K_CODE_LENGTH_CODE_ORDER[i as usize]] =
+                reader.read_bits(3).unwrap() as u32;
         }
 
         for symbol in 0..NUM_CODE_LENGTH_CODES {
@@ -443,11 +461,15 @@ fn decode_huffman_tree(reader: &mut VP8LBitReader, alphabet_size: usize, max_tab
             let length_nbits = 2 + 2 * reader.read_bits(3).unwrap();
             max_symbol = 2 + reader.read_bits(length_nbits as u8).unwrap();
         } else {
-            max_symbol = alphabet_size as u32; 
+            max_symbol = alphabet_size as u32;
         }
 
         let mut code_lengths: Vec<u32> = vec![0; max_symbol as usize];
-        let _ = decode_code_lengths(reader, &mut code_lengths, &code_length_code_lengths.to_vec());
+        let _ = decode_code_lengths(
+            reader,
+            &mut code_lengths,
+            &code_length_code_lengths.to_vec(),
+        );
         let count = get_code_lengths_count(&code_lengths);
         debug!("count: {:?}", count);
 
@@ -478,7 +500,10 @@ pub fn scan_webp_vp8l_file(path: &path::Path) -> Result<ScanResultStatus> {
         return Err(ElegantError::WebpError(WebpError::InvalidFile));
     }
 
-    debug!("get_vp8l_data_size() -> 0x{:x}", header.get_vp8l_data_size());
+    debug!(
+        "get_vp8l_data_size() -> 0x{:x}",
+        header.get_vp8l_data_size()
+    );
 
     let mut reader = VP8LBitReader::new(&header.get_vp8l_data());
 
@@ -509,7 +534,7 @@ pub fn scan_webp_vp8l_file(path: &path::Path) -> Result<ScanResultStatus> {
     }
 
     let num_htree_groups_max = 1;
-    let use_meta = reader.read_bit().unwrap() != 0; 
+    let use_meta = reader.read_bit().unwrap() != 0;
     if use_meta {
         error!("Meta code unimplemented.");
         return Err(ElegantError::WebpError(WebpError::UnsupportedBehavior));

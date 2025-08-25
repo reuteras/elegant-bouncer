@@ -15,12 +15,11 @@
 
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use rusqlite::{Connection, Result as RusqliteResult};
+use log::{debug, error};
+use rusqlite::Connection;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
-use walkdir::WalkDir;
-use log::{info, warn, error, debug};
 
 pub struct BackupRecord {
     file_id: String,
@@ -28,7 +27,11 @@ pub struct BackupRecord {
     relative_path: String,
 }
 
-pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn reconstruct_ios_backup(
+    source_dir: &Path,
+    output_dir: &Path,
+    force: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Check if source directory exists
     if !source_dir.exists() || !source_dir.is_dir() {
         return Err(format!("Source directory does not exist: {}", source_dir.display()).into());
@@ -45,7 +48,8 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
         return Err(format!(
             "Output directory '{}' is not empty. Use --force to overwrite.",
             output_dir.display()
-        ).into());
+        )
+        .into());
     }
 
     // Create output directory
@@ -60,13 +64,13 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
             .unwrap()
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
     );
     pb_query.set_message("Reading Manifest.db...");
-    
+
     let records = read_manifest_db(&manifest_db)?;
     pb_query.finish_and_clear();
-    
+
     if records.is_empty() {
         println!("{} No file records found in database", "[!]".yellow());
         return Ok(());
@@ -91,7 +95,10 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
         // Update progress with current file (truncate long paths)
         pb.set_position(idx as u64);
         let display_path = if record.relative_path.len() > 50 {
-            format!("...{}", &record.relative_path[record.relative_path.len().saturating_sub(47)..])
+            format!(
+                "...{}",
+                &record.relative_path[record.relative_path.len().saturating_sub(47)..]
+            )
         } else {
             record.relative_path.clone()
         };
@@ -125,11 +132,20 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
         // Copy the file
         match fs::copy(&source_file, &dest_file) {
             Ok(_) => {
-                debug!("Copied: {} -> {}", source_file.display(), dest_file.display());
+                debug!(
+                    "Copied: {} -> {}",
+                    source_file.display(),
+                    dest_file.display()
+                );
                 copied_count += 1;
             }
             Err(e) => {
-                error!("Failed to copy {} to {}: {}", source_file.display(), dest_file.display(), e);
+                error!(
+                    "Failed to copy {} to {}: {}",
+                    source_file.display(),
+                    dest_file.display(),
+                    e
+                );
                 failed_count += 1;
             }
         }
@@ -138,8 +154,12 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
     // Final position update
     pb.set_position(records.len() as u64);
     pb.set_message("Extraction complete!");
-    pb.finish_with_message(format!("✓ Extracted {} files in {:.2}s", copied_count, start_time.elapsed().as_secs_f64()));
-    
+    pb.finish_with_message(format!(
+        "✓ Extracted {} files in {:.2}s",
+        copied_count,
+        start_time.elapsed().as_secs_f64()
+    ));
+
     // Calculate performance metrics
     let elapsed = start_time.elapsed();
     let files_per_sec = if elapsed.as_secs() > 0 {
@@ -151,12 +171,26 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
     // Display compact summary
     println!();
     println!("{} Extraction Summary:", "►".cyan().bold());
-    println!("  {} {} of {} files ({} skipped)", "Files:".bright_blue(), copied_count, records.len(), failed_count);
-    println!("  {} {:.2}s ({:.1} files/sec)", "Time:".bright_blue(), elapsed.as_secs_f64(), files_per_sec);
+    println!(
+        "  {} {} of {} files ({} skipped)",
+        "Files:".bright_blue(),
+        copied_count,
+        records.len(),
+        failed_count
+    );
+    println!(
+        "  {} {:.2}s ({:.1} files/sec)",
+        "Time:".bright_blue(),
+        elapsed.as_secs_f64(),
+        files_per_sec
+    );
     println!("  {} {}", "Output:".bright_blue(), output_dir.display());
 
     if failed_count > 0 {
-        println!("  {} Some files were skipped (normal for iOS backups)", "[!]".yellow());
+        println!(
+            "  {} Some files were skipped (normal for iOS backups)",
+            "[!]".yellow()
+        );
     }
 
     Ok(())
@@ -164,10 +198,9 @@ pub fn reconstruct_ios_backup(source_dir: &Path, output_dir: &Path, force: bool)
 
 fn read_manifest_db(db_path: &Path) -> Result<Vec<BackupRecord>, Box<dyn std::error::Error>> {
     let conn = Connection::open(db_path)?;
-    
-    let mut stmt = conn.prepare(
-        "SELECT fileID, domain, relativePath FROM Files WHERE relativePath IS NOT NULL"
-    )?;
+
+    let mut stmt = conn
+        .prepare("SELECT fileID, domain, relativePath FROM Files WHERE relativePath IS NOT NULL")?;
 
     let records = stmt.query_map([], |row| {
         Ok(BackupRecord {
@@ -185,17 +218,23 @@ fn read_manifest_db(db_path: &Path) -> Result<Vec<BackupRecord>, Box<dyn std::er
     Ok(result)
 }
 
-pub fn extract_ios_backup(source_dir: &Path, output_dir: Option<&Path>, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn extract_ios_backup(
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    force: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Determine output directory
     let output_path = if let Some(dir) = output_dir {
         dir.to_path_buf()
     } else {
         // Default: create reconstructed_backup folder next to source
-        source_dir.parent()
-            .unwrap_or(Path::new("."))
-            .join(format!("{}_reconstructed", source_dir.file_name()
+        source_dir.parent().unwrap_or(Path::new(".")).join(format!(
+            "{}_reconstructed",
+            source_dir
+                .file_name()
                 .and_then(|n| n.to_str())
-                .unwrap_or("backup")))
+                .unwrap_or("backup")
+        ))
     };
 
     reconstruct_ios_backup(source_dir, &output_path, force)

@@ -9,12 +9,12 @@
 //
 // Author:
 //  Matt Suiche (msuiche) 22-Sep-2023
-// 
+//
 // Changelog:
 // 22-Sep-2023 (msuiche) - Initial implementation
 //
+use log::{debug, error, trace};
 use std::fmt;
-use log::{error, warn, debug, trace};
 
 use crate::webp::VP8LBitReader;
 
@@ -113,11 +113,14 @@ impl HTree {
         }
         let base_code: u32;
         if code_length > LUT_SIZE as u32 {
-            base_code = (REVERSE_BITS[((code >> (code_length - LUT_SIZE as u32)) & 0xff) as usize] as u32) >> (8 - LUT_SIZE);
+            base_code = (REVERSE_BITS[((code >> (code_length - LUT_SIZE as u32)) & 0xff) as usize]
+                as u32)
+                >> (8 - LUT_SIZE);
         } else {
             base_code = (REVERSE_BITS[(code & 0xff) as usize] as u32) >> (8 - code_length);
             for i in 0..1 << (LUT_SIZE - code_length as usize) {
-                self.lut[base_code as usize | ((i as u32) << code_length) as usize] = symbol << 8 | (code_length + 1);
+                self.lut[base_code as usize | ((i as u32) << code_length) as usize] =
+                    symbol << 8 | (code_length + 1);
             }
         }
         let mut n = 0;
@@ -133,16 +136,22 @@ impl HTree {
             match self.nodes[n].children {
                 LEAF_NODE => {
                     error!("unexpected leaf node");
-                    return Err(HuffmanError::InvalidHuffmanTree)
-                },
+                    return Err(HuffmanError::InvalidHuffmanTree);
+                }
                 0 => {
                     if n >= self.nodes.len() {
                         error!("too many nodes");
                         return Err(HuffmanError::InvalidHuffmanTree);
                     }
                     self.nodes[n].children = self.nodes.len() as i32;
-                    self.nodes.push(HNode { symbol: 0, children: 0 });
-                    self.nodes.push(HNode { symbol: 0, children: 0 });
+                    self.nodes.push(HNode {
+                        symbol: 0,
+                        children: 0,
+                    });
+                    self.nodes.push(HNode {
+                        symbol: 0,
+                        children: 0,
+                    });
                 }
                 _ => {}
             }
@@ -166,8 +175,8 @@ impl HTree {
             0 => self.nodes[n as usize].children = LEAF_NODE,
             e => {
                 error!("null type? for n = {} children = {}", n, e);
-                return Err(HuffmanError::InvalidHuffmanTree)
-            },
+                return Err(HuffmanError::InvalidHuffmanTree);
+            }
         }
 
         self.nodes[n as usize].symbol = symbol;
@@ -262,5 +271,3 @@ fn code_lengths_to_codes(code_lengths: &Vec<u32>) -> Result<Vec<u32>, HuffmanErr
     }
     Ok(codes)
 }
-
-

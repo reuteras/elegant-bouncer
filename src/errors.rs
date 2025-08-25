@@ -9,15 +9,15 @@
 //
 // Author:
 //  Matt Suiche (msuiche) 22-Sep-2023
-// 
+//
 // Changelog:
 // 22-Sep-2023 (msuiche) - Initial implementation
 //
 use std::io;
 use thiserror::Error;
 
-use crate::webp::WebpError;
 use crate::ttf::TtfError;
+use crate::webp::WebpError;
 // use crate::huffman::HuffmanError;
 
 #[derive(Debug, Error)]
@@ -33,7 +33,6 @@ pub enum ElegantError {
 
     #[error("TTF error: {0}")]
     TtfError(TtfError),
-
     /*
     #[error("Huffman error: {0}")]
     HuffmanError(HuffmanError),
@@ -44,7 +43,7 @@ pub enum ElegantError {
 pub enum ScanResultStatus {
     StatusOk,
     // StatusSuspicious,
-    StatusMalicious
+    StatusMalicious,
 }
 
 pub type Result<T> = std::result::Result<T, ElegantError>;

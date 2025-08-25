@@ -11,6 +11,11 @@
 //  Matt Suiche (msuiche) 23-Aug-2025
 //
 
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -19,23 +24,21 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Gauge, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use rayon::prelude::*;
 use std::{
     io,
-    sync::{Arc, Mutex, atomic::{AtomicBool, AtomicUsize, Ordering}},
-    time::{Duration, Instant},
     path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread,
+    time::{Duration, Instant},
 };
-use rayon::prelude::*;
 
 #[derive(Clone)]
 pub struct TUIState {
-    pub current_files: Vec<String>,  // Changed to show multiple active files
+    pub current_files: Vec<String>, // Changed to show multiple active files
     pub files_scanned: usize,
     pub total_files: usize,
     pub threats: Vec<ThreatInfo>,
@@ -80,19 +83,17 @@ impl App {
     }
 }
 
-pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<dyn std::error::Error>> {
+pub fn run_tui_scan(
+    files: Vec<PathBuf>,
+) -> Result<Vec<crate::ScanResult>, Box<dyn std::error::Error>> {
     // Setup panic handler to restore terminal
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
         let _ = disable_raw_mode();
-        let _ = execute!(
-            io::stdout(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        );
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         original_hook(panic);
     }));
-    
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -111,33 +112,36 @@ pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<d
         let results = Arc::new(Mutex::new(Vec::new()));
         let files_scanned = Arc::new(AtomicUsize::new(0));
         let active_files = Arc::new(Mutex::new(Vec::<String>::new()));
-        
+
         // Use parallel iterator for scanning
         files.par_iter().enumerate().for_each(|(idx, file_path)| {
             // Check if we should abort
             if should_quit_clone.load(Ordering::Relaxed) {
                 return;
             }
-            
+
             let thread_id = rayon::current_thread_index().unwrap_or(0);
-            let file_name = file_path.file_name()
+            let file_name = file_path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            
+
             // Add this file to active files for this thread
             {
                 let app = app_clone.lock().unwrap();
                 let mut state = app.state.lock().unwrap();
-                
+
                 // Ensure we have enough slots for all threads
                 while state.current_files.len() <= thread_id {
                     state.current_files.push(String::new());
                 }
-                
+
                 // Update this thread's current file
-                state.current_files[thread_id] = format!("[Thread {}] {}", thread_id + 1, file_name);
-                state.current_status = format!("Processing {} files in parallel [{}/{}]", 
+                state.current_files[thread_id] =
+                    format!("[Thread {}] {}", thread_id + 1, file_name);
+                state.current_status = format!(
+                    "Processing {} files in parallel [{}/{}]",
                     state.current_files.iter().filter(|s| !s.is_empty()).count(),
                     files_scanned.load(Ordering::Relaxed),
                     files.len()
@@ -146,12 +150,12 @@ pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<d
 
             // Scan the file
             let result = crate::scan_single_file(file_path);
-            
+
             // Check for threats and update state
             {
                 let app = app_clone.lock().unwrap();
                 let mut state = app.state.lock().unwrap();
-                
+
                 if result.forcedentry {
                     state.threats.push(ThreatInfo {
                         file_path: file_path.display().to_string(),
@@ -184,18 +188,18 @@ pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<d
                         timestamp: Instant::now(),
                     });
                 }
-                
+
                 // Update files scanned count
                 let count = files_scanned.fetch_add(1, Ordering::Relaxed) + 1;
                 state.files_scanned = count;
             }
-            
+
             // Store result
             {
                 let mut res = results.lock().unwrap();
                 res.push(result);
             }
-            
+
             // Clear this thread's current file when done
             {
                 let app = app_clone.lock().unwrap();
@@ -205,7 +209,7 @@ pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<d
                 }
             }
         });
-        
+
         // Check if aborted
         if should_quit_clone.load(Ordering::Relaxed) {
             let app = app_clone.lock().unwrap();
@@ -218,7 +222,7 @@ pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<d
             state.scan_complete = true;
             state.current_status = "Scan Complete".to_string();
         }
-        
+
         // Return results
         Arc::try_unwrap(results)
             .map(|mutex| mutex.into_inner().unwrap())
@@ -243,7 +247,7 @@ pub fn run_tui_scan(files: Vec<PathBuf>) -> Result<Vec<crate::ScanResult>, Box<d
                 }
             }
         }
-        
+
         // Don't auto-exit - let user review results and quit when ready
     }
 
@@ -307,14 +311,14 @@ fn handle_input(app: &mut App, key: KeyEvent) -> bool {
 
 fn draw_ui(f: &mut Frame, app: &App) {
     let state = app.state.lock().unwrap();
-    
+
     // Create main layout with grid
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(20),    // Main content
-            Constraint::Length(3),  // Footer
+            Constraint::Length(3), // Header
+            Constraint::Min(20),   // Main content
+            Constraint::Length(3), // Footer
         ])
         .split(f.size());
 
@@ -325,8 +329,8 @@ fn draw_ui(f: &mut Frame, app: &App) {
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50),  // Left panel
-            Constraint::Percentage(50),  // Right panel
+            Constraint::Percentage(50), // Left panel
+            Constraint::Percentage(50), // Right panel
         ])
         .split(chunks[1]);
 
@@ -334,8 +338,8 @@ fn draw_ui(f: &mut Frame, app: &App) {
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),   // Progress section
-            Constraint::Min(5),      // Current file section
+            Constraint::Length(8), // Progress section
+            Constraint::Min(5),    // Current file section
         ])
         .split(main_chunks[0]);
 
@@ -346,8 +350,8 @@ fn draw_ui(f: &mut Frame, app: &App) {
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),   // Statistics
-            Constraint::Min(5),      // Threats list
+            Constraint::Length(8), // Statistics
+            Constraint::Min(5),    // Threats list
         ])
         .split(main_chunks[1]);
 
@@ -361,7 +365,12 @@ fn draw_ui(f: &mut Frame, app: &App) {
 fn draw_header(f: &mut Frame, area: Rect) {
     let header = Paragraph::new(Line::from(vec![
         Span::raw(" "),
-        Span::styled("ELEGANTBOUNCER", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "ELEGANTBOUNCER",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" v0.2 - "),
         Span::styled("Mobile Exploit Detection", Style::default().fg(Color::Gray)),
     ]))
@@ -369,10 +378,10 @@ fn draw_header(f: &mut Frame, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(Color::Cyan)),
     )
     .alignment(Alignment::Center);
-    
+
     f.render_widget(header, area);
 }
 
@@ -411,9 +420,9 @@ fn draw_progress(f: &mut Frame, area: Rect, state: &TUIState) {
     f.render_widget(gauge, chunks[1]);
 
     // File counter
-    let counter = Paragraph::new(format!("{} / {} files processed", 
-        state.files_scanned, 
-        state.total_files
+    let counter = Paragraph::new(format!(
+        "{} / {} files processed",
+        state.files_scanned, state.total_files
     ))
     .alignment(Alignment::Center)
     .style(Style::default().fg(Color::White));
@@ -430,37 +439,55 @@ fn draw_current_scan(f: &mut Frame, area: Rect, state: &TUIState) {
     let mut content = vec![
         Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::Gray)),
-            Span::styled(&state.current_status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &state.current_status,
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Active Scans:", Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Active Scans:",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        )]),
     ];
-    
+
     // Show all active scanning threads
-    let active_files: Vec<&String> = state.current_files.iter()
+    let active_files: Vec<&String> = state
+        .current_files
+        .iter()
         .filter(|f| !f.is_empty())
         .collect();
-    
+
     if state.scan_complete {
-        content.push(Line::from(vec![
-            Span::styled("  ✓ All files processed successfully", Style::default().fg(Color::Green)),
-        ]));
+        content.push(Line::from(vec![Span::styled(
+            "  ✓ All files processed successfully",
+            Style::default().fg(Color::Green),
+        )]));
         content.push(Line::from(""));
-        content.push(Line::from(vec![
-            Span::styled(format!("  Total: {} files scanned", state.files_scanned), Style::default().fg(Color::White)),
-        ]));
-        content.push(Line::from(vec![
-            Span::styled(format!("  Threats: {} detected", state.threats.len()), 
-                Style::default().fg(if state.threats.is_empty() { Color::Green } else { Color::Red })),
-        ]));
+        content.push(Line::from(vec![Span::styled(
+            format!("  Total: {} files scanned", state.files_scanned),
+            Style::default().fg(Color::White),
+        )]));
+        content.push(Line::from(vec![Span::styled(
+            format!("  Threats: {} detected", state.threats.len()),
+            Style::default().fg(if state.threats.is_empty() {
+                Color::Green
+            } else {
+                Color::Red
+            }),
+        )]));
     } else if active_files.is_empty() {
-        content.push(Line::from(vec![
-            Span::styled("  Waiting for files...", Style::default().fg(Color::DarkGray)),
-        ]));
+        content.push(Line::from(vec![Span::styled(
+            "  Waiting for files...",
+            Style::default().fg(Color::DarkGray),
+        )]));
     } else {
-        for file in active_files.iter().take(8) {  // Show up to 8 active threads
+        for file in active_files.iter().take(8) {
+            // Show up to 8 active threads
             content.push(Line::from(vec![
                 Span::styled("  • ", Style::default().fg(Color::Cyan)),
                 Span::styled(file.as_str(), Style::default().fg(Color::White)),
@@ -475,7 +502,7 @@ fn draw_current_scan(f: &mut Frame, area: Rect, state: &TUIState) {
                 .title_alignment(Alignment::Center)
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Blue))
+                .border_style(Style::default().fg(Color::Blue)),
         )
         .wrap(Wrap { trim: true });
 
@@ -491,40 +518,58 @@ fn draw_statistics(f: &mut Frame, area: Rect, state: &TUIState) {
     };
 
     let num_threads = num_cpus::get().min(8);
-    
+
     let stats = vec![
         Line::from(vec![
             Span::styled("Parallel Threads: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{}", num_threads), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", num_threads),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Elapsed Time: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{:02}:{:02}", elapsed.as_secs() / 60, elapsed.as_secs() % 60), 
-                Style::default().fg(Color::White)),
+            Span::styled(
+                format!(
+                    "{:02}:{:02}",
+                    elapsed.as_secs() / 60,
+                    elapsed.as_secs() % 60
+                ),
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Scan Rate: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{:.1} files/sec", scan_rate), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{:.1} files/sec", scan_rate),
+                Style::default().fg(Color::White),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Threats Found: ", Style::default().fg(Color::Gray)),
             Span::styled(
                 format!("{}", state.threats.len()),
-                Style::default().fg(if state.threats.is_empty() { Color::Green } else { Color::Red })
-                    .add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(if state.threats.is_empty() {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    })
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
     ];
 
-    let paragraph = Paragraph::new(stats)
-        .block(
-            Block::default()
-                .title(" Statistics ")
-                .title_alignment(Alignment::Center)
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Magenta))
-        );
+    let paragraph = Paragraph::new(stats).block(
+        Block::default()
+            .title(" Statistics ")
+            .title_alignment(Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Magenta)),
+    );
 
     f.render_widget(paragraph, area);
 }
@@ -535,9 +580,11 @@ fn draw_threats(f: &mut Frame, area: Rect, state: &TUIState, scroll: usize) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(
-            if state.threats.is_empty() { Color::Green } else { Color::Red }
-        ));
+        .border_style(Style::default().fg(if state.threats.is_empty() {
+            Color::Green
+        } else {
+            Color::Red
+        }));
 
     if state.threats.is_empty() {
         let no_threats = Paragraph::new("No threats detected")
@@ -546,7 +593,8 @@ fn draw_threats(f: &mut Frame, area: Rect, state: &TUIState, scroll: usize) {
             .style(Style::default().fg(Color::Green));
         f.render_widget(no_threats, area);
     } else {
-        let items: Vec<ListItem> = state.threats
+        let items: Vec<ListItem> = state
+            .threats
             .iter()
             .skip(scroll)
             .take(area.height.saturating_sub(2) as usize)
@@ -554,7 +602,10 @@ fn draw_threats(f: &mut Frame, area: Rect, state: &TUIState, scroll: usize) {
                 let content = vec![
                     Line::from(vec![
                         Span::styled("► ", Style::default().fg(Color::Red)),
-                        Span::styled(&threat.threat_type, Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            &threat.threat_type,
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ),
                     ]),
                     Line::from(vec![
                         Span::raw("  "),
@@ -581,20 +632,50 @@ fn draw_threats(f: &mut Frame, area: Rect, state: &TUIState, scroll: usize) {
 fn draw_footer(f: &mut Frame, area: Rect, state: &TUIState) {
     let footer_text = if state.scan_complete {
         vec![
-            Span::styled("✓ Scan Complete! ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "✓ Scan Complete! ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("Review results and press "),
-            Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "q",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" when done | "),
-            Span::styled("↑↓", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "↑↓",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" to scroll threats"),
         ]
     } else {
         vec![
-            Span::styled("⟳ Scanning... ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "⟳ Scanning... ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("Press "),
-            Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "q",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" to abort | "),
-            Span::styled("↑↓", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "↑↓",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" to scroll"),
         ]
     };
@@ -604,7 +685,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &TUIState) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::DarkGray))
+                .border_style(Style::default().fg(Color::DarkGray)),
         )
         .alignment(Alignment::Center);
 

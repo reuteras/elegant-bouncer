@@ -1,8 +1,8 @@
-pub mod jbig2;
-pub mod webp;
-pub mod ttf;
 pub mod dng;
 pub mod errors;
 pub mod huffman;
-pub mod messaging;
 pub mod ios_backup;
+pub mod jbig2;
+pub mod messaging;
+pub mod ttf;
+pub mod webp;
