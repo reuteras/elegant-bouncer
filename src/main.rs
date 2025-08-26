@@ -9,49 +9,49 @@
 //
 // Author:
 //  Matt Suiche (msuiche) 20-Nov-2022
-//
+// 
 // Changelog:
 // 22-Sep-2023 (msuiche) - Add support for WEBP VP8L
 // 20-Nov-2022 (msuiche) - Initial release with JBIG2 support
 //
 
+mod jbig2;
+mod webp;
+mod ttf;
 mod dng;
 mod errors;
 mod huffman;
-mod ios_backup;
-mod jbig2;
-mod messaging;
-mod ttf;
 mod tui;
-mod webp;
+mod messaging;
+mod ios_backup;
 
+use std::path::{Path, PathBuf};
 use colored::*;
+use walkdir::WalkDir;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use walkdir::WalkDir;
 
-use clap::Parser;
 use env_logger;
 use log::LevelFilter;
+use clap::Parser;
 
 use crate::jbig2 as FORCEDENTRY;
-use crate::ttf as TRIANGULATION;
 use crate::webp as BLASTPASS;
+use crate::ttf as TRIANGULATION;
 
 use crate::errors::*;
 
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{Tabled, Table, settings::{Style}};
 
-use md5;
-use sha1::{Digest, Sha1};
-use sha3::Sha3_256;
 use std::{
     fs::File,
     io::{self, Read},
 };
+use md5;
+use sha1::{Sha1, Digest};
+use sha3::Sha3_256;
 
 /*
 const CRATE_VERSION: &'static str =
@@ -115,7 +115,7 @@ struct Results {
     cve_ids: &'static str,
     description: &'static str,
     #[tabled(display_with = "display_bool")]
-    detected: bool,
+    detected: bool
 }
 
 #[derive(Tabled)]
@@ -133,7 +133,7 @@ macro_rules! read_type {
         let hdr: $ty = unsafe { std::mem::transmute(buf) };
         let res: Result<$ty> = Ok(hdr);
         res
-    }};
+    }}
 }
 
 fn display_bool(o: &bool) -> String {
@@ -192,22 +192,26 @@ fn should_scan_for_threat(file_type: &str, threat_type: &str) -> bool {
         }
         "blastpass" => {
             // BLASTPASS is in WebP files
-            matches!(file_type, "webp")
+            matches!(file_type, "webp" )
         }
         "triangulation" => {
             // TRIANGULATION is in TrueType fonts
             // PDFs can embed fonts but we don't parse fonts from PDFs atm.
-            matches!(file_type, "ttf" | "otf")
+            matches!(file_type, "ttf" | "otf" )
         }
         "cve_2025_43300" => {
             // CVE-2025-43300 is in DNG files
             matches!(file_type, "dng" | "tif" | "tiff")
         }
-        _ => true,
+        _ => true
     }
 }
 
 pub fn scan_single_file(path: &Path) -> ScanResult {
+    scan_single_file_with_name(path, None)
+}
+
+pub fn scan_single_file_with_name(path: &Path, original_name: Option<&str>) -> ScanResult {
     let mut result = ScanResult {
         file_path: path.to_path_buf(),
         forcedentry: false,
@@ -216,11 +220,18 @@ pub fn scan_single_file(path: &Path) -> ScanResult {
         cve_2025_43300: false,
     };
 
-    // Determine file type once
-    let file_type = get_file_type(path).unwrap_or_else(|| "unknown".to_string());
+    // debug!("Scanning file: {:?}", path);
+    // debug!("Original name: {:?}", original_name);
+
+    // Determine file type - use original name if provided (for iOS backups), otherwise use actual path
+    let file_type = if let Some(name) = original_name {
+        get_file_type(Path::new(name))
+    } else {
+        get_file_type(path)
+    }.unwrap_or_else(|| "unknown".to_string());
 
     // Only run relevant scanners based on file type
-
+    
     // FORCEDENTRY scan - only for PDFs and GIFs
     if should_scan_for_threat(&file_type, "forcedentry") {
         match FORCEDENTRY::scan_pdf_jbig2_file(path) {
@@ -228,7 +239,7 @@ pub fn scan_single_file(path: &Path) -> ScanResult {
                 if status == ScanResultStatus::StatusMalicious {
                     result.forcedentry = true;
                 }
-            }
+            },
             Err(_) => {}
         }
     }
@@ -240,7 +251,7 @@ pub fn scan_single_file(path: &Path) -> ScanResult {
                 if status == ScanResultStatus::StatusMalicious {
                     result.blastpass = true;
                 }
-            }
+            },
             Err(_) => {}
         }
     }
@@ -252,7 +263,7 @@ pub fn scan_single_file(path: &Path) -> ScanResult {
                 if status == ScanResultStatus::StatusMalicious {
                     result.triangulation = true;
                 }
-            }
+            },
             Err(_) => {}
         }
     }
@@ -276,28 +287,19 @@ fn print_hashes(filename: &str) -> io::Result<()> {
     let mut values = Vec::new();
 
     let md5_result = md5::compute(&buffer);
-    values.push(KeyValue {
-        name: "MD5",
-        value: format!("{:?}", md5_result),
-    });
+    values.push(KeyValue {name: "MD5", value: format!("{:?}", md5_result)});
     // println!("MD5: {:?}", md5_result);
 
     let mut hasher = Sha1::new();
     hasher.update(&buffer);
     let sha1_result = hex::encode(hasher.finalize());
-    values.push(KeyValue {
-        name: "SHA1",
-        value: sha1_result,
-    });
+    values.push(KeyValue {name: "SHA1", value: sha1_result});
     // println!("SHA1: {:?}", sha1_result);
 
     let mut hasher = Sha3_256::new();
     hasher.update(&buffer);
     let sha3_result = hex::encode(hasher.finalize());
-    values.push(KeyValue {
-        name: "SHA3",
-        value: sha3_result,
-    });
+    values.push(KeyValue {name: "SHA3", value: sha3_result});
     // println!("SHA3: {:?}", sha3_result);
 
     println!("[+] File Information:");
@@ -309,36 +311,35 @@ fn print_hashes(filename: &str) -> io::Result<()> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-
+    
     // Print clean header only if not in TUI mode
     if !args.tui {
         println!();
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        println!();
-        println!(
-            "                    {} v{}",
+        println!("  {} v{}", 
             "ELEGANTBOUNCER".green().bold(),
-            CRATE_VERSION.cyan().bold()
+            CRATE_VERSION
         );
-        println!("          Detection Tool for File-Based Mobile Exploits");
-        println!();
-        println!(
-            "  {}: {} • {} • {} • {}",
-            "Threats".yellow().bold(),
-            "FORCEDENTRY".bright_red(),
-            "BLASTPASS".bright_red(),
-            "TRIANGULATION".bright_red(),
-            "CVE-2025-43300".bright_red()
+        println!("  File Based Detection Tool");
+        println!("  {}", "────────────────────────────────────────────────────────────────".bright_black());
+        println!("  Threat Detection Capabilities:");
+        println!("    {}  CVE-2021-30860", 
+            "FORCEDENTRY    ".red()
         );
-        println!();
-        println!("  {} Matt Suiche (@msuiche)", "Author:".bright_blue());
-        println!(
-            "  {} https://github.com/msuiche/elegant-bouncer",
-            "GitHub:".bright_blue()
+        println!("    {}  CVE-2023-4863, CVE-2023-41064", 
+            "BLASTPASS      ".red()
         );
-        println!("  {} https://www.msuiche.com", "Website:".bright_blue());
-        println!();
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("    {}  CVE-2023-41990", 
+            "TRIANGULATION  ".red()
+        );
+        println!("    {}  CVE-2025-43300", 
+            "DNG EXPLOIT    ".red()
+        );
+        println!("  {}", "────────────────────────────────────────────────────────────────".bright_black());
+        println!("  {}:     Matt Suiche (@msuiche)", "Author".bright_black());
+        println!("  {}:     https://github.com/msuiche/elegant-bouncer", "GitHub".bright_black());
+        println!("  {}:    https://www.msuiche.com", "Website".bright_black());
+        println!("  {}:  Copyright © 2025 Matt Suiche. All rights reserved.", "Copyright".bright_black());
+        println!("  {}:    Licensed under CC BY-NC-SA 4.0 (Non-Commercial Use Only)", "License".bright_black());
         println!();
     }
 
@@ -352,22 +353,12 @@ fn main() -> Result<()> {
 
         env_logger::Builder::new()
             .filter_level(level)
-            .filter_module(
-                "lopdf",
-                if args.verbose {
-                    LevelFilter::Debug
-                } else {
-                    LevelFilter::Off
-                },
-            ) // Hide lopdf errors unless verbose
+            .filter_module("lopdf", if args.verbose { LevelFilter::Debug } else { LevelFilter::Off })  // Hide lopdf errors unless verbose
             .init();
     }
 
     if !args.scan && !args.create_forcedentry && !args.ios_extract {
-        println!(
-            "You need to supply an action. Run with {} for more information.",
-            "--help".green()
-        );
+        println!("You need to supply an action. Run with {} for more information.", "--help".green());
         return Ok(());
     }
 
@@ -375,11 +366,7 @@ fn main() -> Result<()> {
 
     // Check if path exists for scan and ios_extract operations
     if (args.scan || args.ios_extract) && !path.exists() {
-        eprintln!(
-            "{} Error: Path does not exist: {}",
-            "✗".red().bold(),
-            path.display()
-        );
+        eprintln!("{} Error: Path does not exist: {}", "✗".red().bold(), path.display());
         return Ok(());
     }
 
@@ -393,14 +380,11 @@ fn main() -> Result<()> {
         println!();
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!();
-
+        
         let output_path = args.output.as_ref().map(Path::new);
         match ios_backup::extract_ios_backup(path, output_path, args.force) {
             Ok(_) => {
-                println!(
-                    "{} iOS backup extraction completed successfully!",
-                    "✓".green().bold()
-                );
+                println!("{} iOS backup extraction completed successfully!", "✓".green().bold());
             }
             Err(e) => {
                 eprintln!("{} Failed to extract iOS backup: {}", "✗".red().bold(), e);
@@ -419,39 +403,22 @@ fn main() -> Result<()> {
         let extensions = args.extensions.unwrap_or_else(get_default_extensions);
         let mut all_scan_results = Vec::new();
 
-        // Auto-detect iOS backup structure if not explicitly set
-        let messaging_mode = args.messaging;
-
-        /*
-        // Disabled for now in case the user wants to scan a single file or do recursive scanning.
-        if !messaging_mode && path.is_dir() {
-            let has_home_domain = path.join("HomeDomain").exists();
-            let has_media_domain = path.join("MediaDomain").exists();
-            // let has_manifest_db = path.join("Manifest.db").exists();
-
-            // Check for AppDomainGroup folders (common pattern in iOS backups)
-            let has_app_domain_group = path.read_dir()
-                .map(|entries| {
-                    entries.filter_map(|e| e.ok())
-                        .any(|entry| {
-                            entry.file_name().to_string_lossy().starts_with("AppDomainGroup-")
-                        })
-                })
-                .unwrap_or(false);
-
-            if (has_home_domain || has_media_domain || has_app_domain_group) {
-                messaging_mode = true;
-                if !args.tui {
-                    println!("{} Detected iOS backup structure, enabling messaging attachment scan", "[+]".green());
-                }
+        // Check if this is an unreconstructed iOS backup
+        let is_ios_backup = path.is_dir() && ios_backup::is_ios_backup(path);
+        
+        // Auto-detect iOS backup and enable messaging mode if it's an iOS backup
+        let mut messaging_mode = args.messaging;
+        if !messaging_mode && is_ios_backup {
+            messaging_mode = true;
+            if !args.tui {
+                println!("{} Detected iOS backup, enabling messaging attachment scan", "[+]".green());
             }
         }
-        */
 
         // Collect files to scan based on mode
         let mut files_to_scan: Vec<PathBuf> = Vec::new();
         let mut file_origins: Vec<Option<String>> = Vec::new();
-
+        
         if messaging_mode {
             // Get messaging attachments
             if !args.tui {
@@ -462,26 +429,25 @@ fn main() -> Result<()> {
                 println!("and analyzes all attachments for known mobile exploits.");
                 println!();
             }
-
+            
             let messaging_attachments = messaging::find_messaging_attachments(path);
-
+            
             if messaging_attachments.is_empty() {
                 println!("{} No attachments found in messaging apps", "[!]".yellow());
                 return Ok(());
             }
-
+            
             // Extract file paths and origins for scanning
             for attachment in messaging_attachments {
                 files_to_scan.push(attachment.file_path);
-                file_origins.push(Some(attachment.origin));
+                // Store the original filename for proper file type detection
+                file_origins.push(Some(attachment.original_name));
             }
-
+            
             if !args.tui {
-                println!(
-                    "{} Found {} attachments in messaging apps to scan",
-                    "[+]".green(),
-                    files_to_scan.len()
-                );
+                println!("{} Found {} attachments in messaging apps to scan", 
+                    "[+]".green(), 
+                    files_to_scan.len());
             }
         } else {
             // Regular file/directory scanning
@@ -511,8 +477,14 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            // Run TUI scan
-            match tui::run_tui_scan(files_to_scan) {
+            // Run TUI scan with origins if available
+            let tui_result = if !file_origins.is_empty() {
+                tui::run_tui_scan_with_origins(files_to_scan, file_origins)
+            } else {
+                tui::run_tui_scan(files_to_scan)
+            };
+            
+            match tui_result {
                 Ok(results) => {
                     all_scan_results = results;
                     // Exit after TUI completes - the TUI already shows results
@@ -528,30 +500,18 @@ fn main() -> Result<()> {
             println!("[+] Scanning file: {}", files_to_scan[0].display());
             let result = scan_single_file(&files_to_scan[0]);
             all_scan_results.push(result);
-
+            
             // Display file info
             println!();
             let _ = print_hashes(&args.path);
         } else if !files_to_scan.is_empty() {
             // Multiple files scan with progress bar
             if !args.messaging {
-                println!(
-                    "{} Scanning directory: {}",
-                    "►".cyan().bold(),
-                    path.display().to_string().bright_white()
-                );
+                println!("{} Scanning directory: {}", "►".cyan().bold(), path.display().to_string().bright_white());
                 if args.recursive {
-                    println!(
-                        "{} Recursive mode: {}",
-                        "►".cyan().bold(),
-                        "ENABLED".green()
-                    );
+                    println!("{} Recursive mode: {}", "►".cyan().bold(), "ENABLED".green());
                 }
-                println!(
-                    "{} Extensions: {}",
-                    "►".cyan().bold(),
-                    extensions.join(", ").yellow()
-                );
+                println!("{} Extensions: {}", "►".cyan().bold(), extensions.join(", ").yellow());
             }
             println!();
 
@@ -567,12 +527,8 @@ fn main() -> Result<()> {
 
             // Use number of CPU cores for parallel scanning
             let num_threads = num_cpus::get().min(8); // Cap at 8 threads
-            println!(
-                "{} Using {} parallel threads",
-                "►".cyan().bold(),
-                num_threads.to_string().green()
-            );
-
+            println!("{} Using {} parallel threads", "►".cyan().bold(), num_threads.to_string().green());
+            
             // Start timing
             let start_time = Instant::now();
 
@@ -581,67 +537,75 @@ fn main() -> Result<()> {
             let scan_results = Arc::new(Mutex::new(Vec::new()));
 
             // Parallel scanning with rayon
-            files_to_scan
-                .par_iter()
-                .enumerate()
-                .for_each(|(idx, file_path)| {
-                    let file_name = file_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown");
-
-                    // Include origin in message if available
-                    let message = if args.messaging && idx < file_origins.len() {
-                        if let Some(ref origin) = file_origins[idx] {
-                            format!("Scanning: {} ({})", file_name, origin)
+            files_to_scan.par_iter().enumerate().for_each(|(idx, file_path)| {
+                let file_name = file_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                
+                // Include origin in message if available
+                let message = if idx < file_origins.len() {
+                    if let Some(ref origin) = file_origins[idx] {
+                        // For iOS backup files, show the original path
+                        if is_ios_backup {
+                            format!("Scanning: {}", origin)
                         } else {
-                            format!("Scanning: {}", file_name)
+                            format!("Scanning: {} ({})", file_name, origin)
                         }
                     } else {
                         format!("Scanning: {}", file_name)
-                    };
-
-                    pb.set_message(message);
-                    pb.set_position((idx + 1) as u64);
-
-                    let result = scan_single_file(file_path);
-
-                    // Report if any threats found
-                    if result.forcedentry
-                        || result.blastpass
-                        || result.triangulation
-                        || result.cve_2025_43300
-                    {
-                        let mut count = threat_count.lock().unwrap();
-                        *count += 1;
-
-                        pb.suspend(|| {
-                            print!(
-                                "  {} {} - ",
-                                "✗".red().bold(),
-                                file_path.display().to_string().bright_white()
-                            );
-                            let mut threats = Vec::new();
-                            if result.forcedentry {
-                                threats.push("FORCEDENTRY");
-                            }
-                            if result.blastpass {
-                                threats.push("BLASTPASS");
-                            }
-                            if result.triangulation {
-                                threats.push("TRIANGULATION");
-                            }
-                            if result.cve_2025_43300 {
-                                threats.push("CVE-2025-43300");
-                            }
-                            println!("{}", threats.join(", ").red().bold());
-                        });
                     }
-
-                    let mut results = scan_results.lock().unwrap();
-                    results.push(result);
-                });
-
+                } else {
+                    format!("Scanning: {}", file_name)
+                };
+                
+                pb.set_message(message);
+                pb.set_position((idx + 1) as u64);
+                
+                // For iOS backups, pass the original filename so file type detection works
+                let result = if is_ios_backup && idx < file_origins.len() {
+                    if let Some(ref origin) = file_origins[idx] {
+                        // Extract just the filename from the full iOS path
+                        let original_name = Path::new(origin).file_name()
+                            .and_then(|n| n.to_str());
+                        scan_single_file_with_name(file_path, original_name)
+                    } else {
+                        scan_single_file(file_path)
+                    }
+                } else {
+                    scan_single_file(file_path)
+                };
+                
+                // Report if any threats found
+                if result.forcedentry || result.blastpass || result.triangulation || result.cve_2025_43300 {
+                    let mut count = threat_count.lock().unwrap();
+                    *count += 1;
+                    
+                    pb.suspend(|| {
+                        // Show iOS original path if available, otherwise show the file path
+                        let display_path = if is_ios_backup && idx < file_origins.len() {
+                            if let Some(ref origin) = file_origins[idx] {
+                                origin.clone()
+                            } else {
+                                file_path.display().to_string()
+                            }
+                        } else {
+                            file_path.display().to_string()
+                        };
+                        
+                        print!("  {} {} - ", "✗".red().bold(), display_path.bright_white());
+                        let mut threats = Vec::new();
+                        if result.forcedentry { threats.push("FORCEDENTRY"); }
+                        if result.blastpass { threats.push("BLASTPASS"); }
+                        if result.triangulation { threats.push("TRIANGULATION"); }
+                        if result.cve_2025_43300 { threats.push("CVE-2025-43300"); }
+                        println!("{}", threats.join(", ").red().bold());
+                    });
+                }
+                
+                let mut results = scan_results.lock().unwrap();
+                results.push(result);
+            });
+            
             // Get final results
             all_scan_results = Arc::try_unwrap(scan_results)
                 .map(|mutex| mutex.into_inner().unwrap())
@@ -649,9 +613,9 @@ fn main() -> Result<()> {
                     let guard = arc.lock().unwrap();
                     guard.clone()
                 });
-
+            
             let final_threat_count = *threat_count.lock().unwrap();
-
+            
             // Calculate performance metrics
             let elapsed = start_time.elapsed();
             let files_per_sec = if elapsed.as_secs() > 0 {
@@ -659,16 +623,14 @@ fn main() -> Result<()> {
             } else {
                 files_to_scan.len() as f64
             };
-
+            
             pb.finish_with_message(format!("Completed - {} threats found", final_threat_count));
             println!();
-            println!(
-                "{} Scanned {} files in {:.2}s ({:.1} files/sec)",
-                "✓".green().bold(),
+            println!("{} Scanned {} files in {:.2}s ({:.1} files/sec)", 
+                "✓".green().bold(), 
                 files_to_scan.len(),
                 elapsed.as_secs_f64(),
-                files_per_sec
-            );
+                files_per_sec);
         } else {
             println!("{} No files found to scan", "[!]".yellow());
             return Ok(());
@@ -703,11 +665,7 @@ fn main() -> Result<()> {
         // Display summary results with improved formatting
         println!();
         println!("╔══════════════════════════════════════════════════════════════════════════╗");
-        println!(
-            "║                           {} SUMMARY RESULTS {}                           ║",
-            "▓".cyan(),
-            "▓".cyan()
-        );
+        println!("║                           {} SUMMARY RESULTS {}                           ║", "▓".cyan(), "▓".cyan());
         println!("╚══════════════════════════════════════════════════════════════════════════╝");
         println!();
         let results = vec![
@@ -726,15 +684,13 @@ fn main() -> Result<()> {
             Results {
                 name: "TRIANGULATION",
                 cve_ids: "CVE-2023-41990",
-                description:
-                    "Maliciously crafted TrueType font embedded in PDFs shared over iMessage",
+                description: "Maliciously crafted TrueType font embedded in PDFs shared over iMessage",
                 detected: triangulation_detected,
             },
             Results {
                 name: "CVE-2025-43300",
                 cve_ids: "CVE-2025-43300",
-                description:
-                    "Malicious DNG with JPEG Lossless compression exploiting RawCamera.bundle",
+                description: "Malicious DNG with JPEG Lossless compression exploiting RawCamera.bundle",
                 detected: cve_2025_43300_detected,
             },
         ];
@@ -743,10 +699,7 @@ fn main() -> Result<()> {
         println!("{}", table);
 
         // Show detailed infected files table if any threats found
-        if !all_scan_results
-            .iter()
-            .any(|r| r.forcedentry || r.blastpass || r.triangulation || r.cve_2025_43300)
-        {
+        if !all_scan_results.iter().any(|r| r.forcedentry || r.blastpass || r.triangulation || r.cve_2025_43300) {
             // No threats found
         } else {
             // Build detailed infected files list
@@ -756,12 +709,12 @@ fn main() -> Result<()> {
                 threat_name: String,
                 cve_ids: String,
             }
-
+            
             let mut infected_details = Vec::new();
-
+            
             for result in &all_scan_results {
                 let path_str = result.file_path.display().to_string();
-
+                
                 if result.forcedentry {
                     infected_details.push(InfectedFile {
                         path: path_str.clone(),
@@ -769,7 +722,7 @@ fn main() -> Result<()> {
                         cve_ids: "CVE-2021-30860".to_string(),
                     });
                 }
-
+                
                 if result.blastpass {
                     infected_details.push(InfectedFile {
                         path: path_str.clone(),
@@ -777,7 +730,7 @@ fn main() -> Result<()> {
                         cve_ids: "CVE-2023-4863, CVE-2023-41064".to_string(),
                     });
                 }
-
+                
                 if result.triangulation {
                     infected_details.push(InfectedFile {
                         path: path_str.clone(),
@@ -785,7 +738,7 @@ fn main() -> Result<()> {
                         cve_ids: "CVE-2023-41990".to_string(),
                     });
                 }
-
+                
                 if result.cve_2025_43300 {
                     infected_details.push(InfectedFile {
                         path: path_str.clone(),
@@ -794,20 +747,14 @@ fn main() -> Result<()> {
                     });
                 }
             }
-
+            
             if !infected_details.is_empty() {
                 println!();
-                println!(
-                    "╔══════════════════════════════════════════════════════════════════════════╗"
-                );
+                println!("╔══════════════════════════════════════════════════════════════════════════╗");
                 println!("║                        {} INFECTED FILES DETECTED {}                       ║", "⚠".red().bold(), "⚠".red().bold());
-                println!(
-                    "╚══════════════════════════════════════════════════════════════════════════╝"
-                );
+                println!("╚══════════════════════════════════════════════════════════════════════════╝");
                 println!();
-                let infected_table = Table::new(infected_details)
-                    .with(Style::rounded())
-                    .to_string();
+                let infected_table = Table::new(infected_details).with(Style::rounded()).to_string();
                 println!("{}", infected_table);
             }
         }
